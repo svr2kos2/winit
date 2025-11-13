@@ -367,9 +367,26 @@ impl EventLoop {
 
         loop {
             unsafe {
-                // Use filtering_window if set, otherwise peek all messages (null ptr)
-                let hwnd = self.filtering_window.unwrap_or(ptr::null_mut());
-                if PeekMessageW(&mut msg, hwnd, 0, 0, PM_REMOVE) == false.into() {
+                // When filtering_window is set, we need to peek messages from two sources:
+                // 1. The thread_msg_target window (for internal control messages)
+                // 2. The filtering_window (for application window messages)
+                // This ensures internal messages (wake up, execute callback, etc.) are not lost.
+                let has_message = if let Some(filter_hwnd) = self.filtering_window {
+                    // First try to get internal control messages from thread_msg_target
+                    if PeekMessageW(&mut msg, self.runner.thread_msg_target, 0, 0, PM_REMOVE)
+                        != false.into()
+                    {
+                        true
+                    } else {
+                        // Then try to get application messages from the filtered window
+                        PeekMessageW(&mut msg, filter_hwnd, 0, 0, PM_REMOVE) != false.into()
+                    }
+                } else {
+                    // No filtering - peek all messages
+                    PeekMessageW(&mut msg, ptr::null_mut(), 0, 0, PM_REMOVE) != false.into()
+                };
+
+                if !has_message {
                     break;
                 }
 
