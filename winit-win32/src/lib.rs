@@ -230,6 +230,71 @@ pub trait EventLoopBuilderExtWindows {
     fn with_msg_hook<F>(&mut self, callback: F) -> &mut Self
     where
         F: FnMut(*const c_void) -> bool + 'static;
+
+    /// Sets a specific window handle for message filtering.
+    ///
+    /// When set, `PeekMessageW` will only retrieve messages for the specified window,
+    /// instead of all windows on the thread.
+    ///
+    /// **Important**: This method is **only useful for external HWNDs** (e.g., from Flutter or other frameworks).
+    /// For winit-created windows, use [`EventLoopExtWindows::set_filtering_window()`] instead,
+    /// since you need to create the window after the event loop is built.
+    ///
+    /// # Safety
+    ///
+    /// The provided HWND must be valid for the lifetime of the event loop, or be null.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use winit::event_loop::EventLoop;
+    /// #[cfg(target_os = "windows")]
+    /// use winit::platform::windows::EventLoopBuilderExtWindows;
+    ///
+    /// // Only useful if you have an external HWND (e.g., from Flutter)
+    /// let external_hwnd: isize = get_external_window_handle();
+    ///
+    /// let mut builder = EventLoop::builder();
+    /// #[cfg(target_os = "windows")]
+    /// builder.with_filtering_window(Some(external_hwnd));
+    ///
+    /// # if false { // We can't test this part
+    /// let event_loop = builder.build();
+    /// # }
+    /// ```
+    fn with_filtering_window(&mut self, hwnd: Option<isize>) -> &mut Self;
+}
+
+/// Additional methods on `EventLoop` that are specific to Windows.
+pub trait EventLoopExtWindows {
+    /// Set the window handle for message filtering at runtime.
+    ///
+    /// When set, `PeekMessageW` will only retrieve messages for the specified window,
+    /// instead of all windows on the thread. This is useful when integrating winit
+    /// with other UI frameworks (like Flutter) that also run message loops on the same thread.
+    ///
+    /// Pass `None` to reset to the default behavior (process all thread messages).
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use winit::event_loop::EventLoop;
+    /// # #[cfg(target_os = "windows")]
+    /// use winit::platform::windows::EventLoopExtWindows;
+    /// # #[cfg(target_os = "windows")]
+    /// use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    ///
+    /// let mut event_loop = EventLoop::new().unwrap();
+    /// let window = event_loop.create_window(Default::default()).unwrap();
+    ///
+    /// # #[cfg(target_os = "windows")]
+    /// if let Ok(handle) = window.window_handle() {
+    ///     if let RawWindowHandle::Win32(win32_handle) = handle.as_raw() {
+    ///         event_loop.set_filtering_window(Some(win32_handle.hwnd.get() as isize));
+    ///     }
+    /// }
+    /// ```
+    fn set_filtering_window(&mut self, hwnd: Option<isize>);
 }
 
 /// Additional methods on `Window` that are specific to Windows.

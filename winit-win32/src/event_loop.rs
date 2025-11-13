@@ -150,6 +150,8 @@ pub struct EventLoop {
     // It is created lazily in case if we have `ControlFlow::WaitUntil`.
     // Keep it as a field to avoid recreating it on every `ControlFlow::WaitUntil`.
     high_resolution_timer: Option<OwnedHandle>,
+    // If set, only messages for this window will be peeked
+    filtering_window: Option<HWND>,
 }
 
 impl fmt::Debug for EventLoop {
@@ -162,6 +164,10 @@ pub struct PlatformSpecificEventLoopAttributes {
     pub any_thread: bool,
     pub dpi_aware: bool,
     pub msg_hook: Option<Box<dyn FnMut(*const c_void) -> bool + 'static>>,
+    /// If set, PeekMessageW will only retrieve messages for the specified window,
+    /// instead of all windows on the thread. This is useful when integrating winit
+    /// with other UI frameworks (like Flutter) that also run message loops on the same thread.
+    pub filtering_window: Option<HWND>,
 }
 
 impl fmt::Debug for PlatformSpecificEventLoopAttributes {
@@ -169,13 +175,14 @@ impl fmt::Debug for PlatformSpecificEventLoopAttributes {
         f.debug_struct("PlatformSpecificEventLoopAttributes")
             .field("any_thread", &self.any_thread)
             .field("dpi_aware", &self.dpi_aware)
+            .field("filtering_window", &self.filtering_window)
             .finish_non_exhaustive()
     }
 }
 
 impl Default for PlatformSpecificEventLoopAttributes {
     fn default() -> Self {
-        Self { any_thread: false, dpi_aware: true, msg_hook: None }
+        Self { any_thread: false, dpi_aware: true, msg_hook: None, filtering_window: None }
     }
 }
 
@@ -183,6 +190,7 @@ impl PartialEq for PlatformSpecificEventLoopAttributes {
     fn eq(&self, other: &Self) -> bool {
         self.any_thread.eq(&other.any_thread)
             && self.dpi_aware.eq(&other.dpi_aware)
+            && self.filtering_window.eq(&other.filtering_window)
             && match (&self.msg_hook, &other.msg_hook) {
                 (Some(this), Some(other)) => std::ptr::eq(&this, &other),
                 (None, None) => true,
@@ -197,6 +205,7 @@ impl std::hash::Hash for PlatformSpecificEventLoopAttributes {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.any_thread.hash(state);
         self.dpi_aware.hash(state);
+        self.filtering_window.hash(state);
         std::ptr::hash(&self.msg_hook, state);
     }
 }
@@ -240,6 +249,7 @@ impl EventLoop {
             runner: runner_shared,
             msg_hook: attributes.msg_hook.take(),
             high_resolution_timer: None,
+            filtering_window: attributes.filtering_window,
         })
     }
 
@@ -357,7 +367,9 @@ impl EventLoop {
 
         loop {
             unsafe {
-                if PeekMessageW(&mut msg, ptr::null_mut(), 0, 0, PM_REMOVE) == false.into() {
+                // Use filtering_window if set, otherwise peek all messages (null ptr)
+                let hwnd = self.filtering_window.unwrap_or(ptr::null_mut());
+                if PeekMessageW(&mut msg, hwnd, 0, 0, PM_REMOVE) == false.into() {
                     break;
                 }
 
@@ -389,6 +401,35 @@ impl EventLoop {
 
     fn exit_code(&self) -> Option<i32> {
         self.runner.exit_code()
+    }
+
+    /// Set the window handle for message filtering.
+    ///
+    /// When set, `PeekMessageW` will only retrieve messages for the specified window,
+    /// instead of all windows on the thread. This is useful when integrating winit
+    /// with other UI frameworks (like Flutter) that also run message loops on the same thread.
+    ///
+    /// Pass `None` to reset to the default behavior (process all thread messages).
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use winit::event_loop::EventLoop;
+    /// # #[cfg(target_os = "windows")]
+    /// use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    ///
+    /// let mut event_loop = EventLoop::new().unwrap();
+    /// let window = event_loop.create_window(Default::default()).unwrap();
+    ///
+    /// # #[cfg(target_os = "windows")]
+    /// if let Ok(handle) = window.window_handle() {
+    ///     if let RawWindowHandle::Win32(win32_handle) = handle.as_raw() {
+    ///         event_loop.set_filtering_window(Some(win32_handle.hwnd.get() as isize));
+    ///     }
+    /// }
+    /// ```
+    pub fn set_filtering_window(&mut self, hwnd: Option<isize>) {
+        self.filtering_window = hwnd.map(|h| h as _);
     }
 }
 

@@ -440,6 +440,20 @@ impl winit_win32::EventLoopBuilderExtWindows for EventLoopBuilder {
         self.platform_specific.msg_hook = Some(Box::new(callback));
         self
     }
+
+    #[inline]
+    fn with_filtering_window(&mut self, hwnd: Option<isize>) -> &mut Self {
+        self.platform_specific.filtering_window = hwnd.map(|h| h as _);
+        self
+    }
+}
+
+#[cfg(windows_platform)]
+impl winit_win32::EventLoopExtWindows for EventLoop {
+    #[inline]
+    fn set_filtering_window(&mut self, hwnd: Option<isize>) {
+        self.event_loop.set_filtering_window(hwnd);
+    }
 }
 
 #[cfg(x11_platform)]
